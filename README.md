@@ -54,3 +54,45 @@ Le déploiement est réalisé via une application **Dash** interactive stylisée
 │   └── intervals_prediction_calibration.csv
 └── notebook/                   # Recherche et entraînement
     └── MathsProject.ipynb
+```
+
+## 🚀 Installation et Utilisation
+
+### 1. Cloner le projet
+
+```bash
+git clone https://github.com/ElMansouriAya/insurance-clv-dashboard.git
+cd insurance-clv-dashboard
+```
+### 2. Créer et activer un environnement virtuel
+Il est fortement recommandé d'isoler les dépendances dans un environnement virtuel :
+
+Sur Windows :
+
+```bash
+
+python -m venv venv
+.\venv\Scripts\activate
+```
+Sur Mac / Linux :
+
+```bash
+
+python3 -m venv venv
+source venv/bin/activate
+```
+### 3. Installer les dépendances
+Une fois l'environnement activé, installez les bibliothèques nécessaires :
+
+```bash
+
+pip install -r requirements.txt
+```
+### 4. Lancer l'application
+Exécutez le script principal pour démarrer le serveur Dash :
+
+```bash
+
+python app.py
+```
+L'interface sera accessible sur votre navigateur à l'adresse : http://127.0.0.1:8057
