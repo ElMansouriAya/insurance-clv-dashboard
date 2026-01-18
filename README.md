@@ -67,14 +67,14 @@ cd insurance-clv-dashboard
 ### 2. Créer et activer un environnement virtuel
 Il est fortement recommandé d'isoler les dépendances dans un environnement virtuel :
 
-Sur Windows :
+* Sur Windows :
 
 ```bash
 
 python -m venv venv
 .\venv\Scripts\activate
 ```
-Sur Mac / Linux :
+* Sur Mac / Linux :
 
 ```bash
 
