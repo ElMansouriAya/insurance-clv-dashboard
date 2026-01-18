@@ -26,12 +26,13 @@ rf_model = None
 residus_log = None
 encoder = None
 scaler = None
+scaler_numeric_cols = None
 FEATURE_COLUMNS = None
 MODEL_LOADED = False
 
 def load_model():
     """Charger le modèle Random Forest et les artefacts associés"""
-    global rf_model, residus_log, encoder, scaler, FEATURE_COLUMNS, MODEL_LOADED
+    global rf_model, residus_log, encoder, scaler, scaler_numeric_cols, FEATURE_COLUMNS, MODEL_LOADED
 
     try:
         if MODEL_PATH.exists():
@@ -56,9 +57,19 @@ def load_model():
 
         if SCALER_PATH.exists():
             with open(SCALER_PATH, 'rb') as f:
-                scaler = pickle.load(f)
+                scaler_data = pickle.load(f)
+                # Support ancien format (scaler seul) et nouveau format (dict)
+                if isinstance(scaler_data, dict):
+                    scaler = scaler_data['scaler']
+                    scaler_numeric_cols = scaler_data.get('numeric_cols', None)
+                else:
+                    scaler = scaler_data
+                    scaler_numeric_cols = None
             print(f" Scaler chargé depuis {SCALER_PATH}")
+            if scaler_numeric_cols:
+                print(f"   → {len(scaler_numeric_cols)} colonnes numériques à scaler")
 
+        #  Colonnes d'entraînement (indispensable pour éviter les erreurs sklearn: feature names mismatch)
         if FEATURE_COLUMNS_PATH.exists():
             with open(FEATURE_COLUMNS_PATH, 'rb') as f:
                 FEATURE_COLUMNS = pickle.load(f)
@@ -79,7 +90,6 @@ def load_model():
         return False
 
 print("\n" + "="*60)
-print(" Chargement du modèle ML...")
 load_model()
 print("="*60 + "\n")
 
@@ -224,7 +234,6 @@ SAMPLE_PREDICTIONS["upper"] = SAMPLE_PREDICTIONS["predicted"] + width / 2
 
 # Charger les données réelles
 print("\n" + "="*60)
-print(" Chargement des données réelles...")
 load_real_data()
 print("="*60 + "\n")
 
@@ -264,8 +273,8 @@ def prepare_features(coverage, vehicle_class, employment, education, gender,
 
 def predict_with_model(coverage, vehicle_class, employment, education, gender,
                        marital_status, monthly_premium, total_claims, num_policies, income):
-    """Faire une prédiction avec le modèle Random Forest ."""
-    global rf_model, residus_log, encoder, MODEL_LOADED
+    """Faire une prédiction avec le modèle Random Forest réel."""
+    global rf_model, residus_log, encoder, scaler, scaler_numeric_cols, MODEL_LOADED
     
     if not MODEL_LOADED or rf_model is None:
         return simulate_prediction(coverage, vehicle_class, employment, 
@@ -281,8 +290,8 @@ def predict_with_model(coverage, vehicle_class, employment, education, gender,
             X_encoded = encoder.transform(df)
             if hasattr(X_encoded, 'toarray'):
                 X_encoded = X_encoded.toarray()
+            X_encoded = pd.DataFrame(X_encoded)
         else:
-
             X_encoded = pd.get_dummies(df, drop_first=False)
 
             expected_cols = None
@@ -291,9 +300,22 @@ def predict_with_model(coverage, vehicle_class, employment, education, gender,
             elif rf_model is not None and hasattr(rf_model, 'feature_names_in_'):
                 expected_cols = list(rf_model.feature_names_in_)
 
-            
+            # Aligner (ajouter les colonnes manquantes à 0 + respecter l'ordre)
             if expected_cols is not None:
                 X_encoded = X_encoded.reindex(columns=expected_cols, fill_value=0)
+        
+        #  Appliquer le StandardScaler sur les colonnes numériques
+        if scaler is not None:
+            if scaler_numeric_cols is not None:
+                # Nouveau format: on connaît les colonnes exactes
+                cols_to_scale = [c for c in scaler_numeric_cols if c in X_encoded.columns]
+                if cols_to_scale:
+                    X_encoded[cols_to_scale] = scaler.transform(X_encoded[cols_to_scale])
+            else:
+                # Ancien format: scaler toutes les colonnes numériques
+                numeric_cols = X_encoded.select_dtypes(include=[np.number]).columns.tolist()
+                if numeric_cols:
+                    X_encoded[numeric_cols] = scaler.transform(X_encoded[numeric_cols])
         
         pred_log = rf_model.predict(X_encoded)[0]
         prediction = np.expm1(pred_log)
@@ -372,7 +394,7 @@ app.index_string = '''
         {%favicon%}
         {%css%}
         <script src="https://cdn.tailwindcss.com"></script>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Montserrat:wght@400;600;700;800;900&display=swap" rel="stylesheet">
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
         <script>
             tailwind.config = {
@@ -382,17 +404,17 @@ app.index_string = '''
                             background: '#0a0f1a',
                             card: '#111827',
                             'card-hover': '#1f2937',
-                            border: '#1e3a5f',
-                            primary: '#3b82f6',
-                            'primary-glow': '#60a5fa',
+                            border: '#1e293b',
+                            primary: '#22c55e',
+                            'primary-glow': '#4ade80',
                             secondary: '#6366f1',
-                            success: '#10b981',
+                            success: '#22c55e',
                             warning: '#f59e0b',
                             danger: '#ef4444',
                             info: '#06b6d4',
-                            muted: '#6b7280',
-                            foreground: '#f9fafb',
-                            'muted-foreground': '#9ca3af',
+                            muted: '#64748b',
+                            foreground: '#f1f5f9',
+                            'muted-foreground': '#94a3b8',
                         },
                         fontFamily: {
                             sans: ['Inter', 'system-ui', 'sans-serif'],
@@ -422,30 +444,30 @@ app.index_string = '''
             .js-plotly-plot .plotly .main-svg {
                 overflow: visible;
             }
-            /* Glow effects for cards */
+            /* Neon glow effects for dark theme */
             .glow-primary {
-                box-shadow: 0 0 30px rgba(59, 130, 246, 0.2);
+                box-shadow: 0 0 30px rgba(34, 197, 94, 0.25);
             }
             .glow-success {
-                box-shadow: 0 0 30px rgba(16, 185, 129, 0.2);
+                box-shadow: 0 0 30px rgba(34, 197, 94, 0.25);
             }
             .glow-warning {
-                box-shadow: 0 0 30px rgba(245, 158, 11, 0.2);
+                box-shadow: 0 0 30px rgba(245, 158, 11, 0.25);
             }
             .glow-danger {
-                box-shadow: 0 0 30px rgba(239, 68, 68, 0.2);
+                box-shadow: 0 0 30px rgba(239, 68, 68, 0.25);
             }
             .glow-info {
-                box-shadow: 0 0 30px rgba(6, 182, 212, 0.2);
+                box-shadow: 0 0 30px rgba(6, 182, 212, 0.25);
             }
-            /* Dash dropdown styles */
-            .Select-control { background-color: #111827 !important; border-color: #1e3a5f !important; }
-            .Select-menu-outer { background-color: #111827 !important; border-color: #1e3a5f !important; }
-            .Select-option { background-color: #111827 !important; color: #f9fafb !important; }
+            /* Dash dropdown styles - Dark theme */
+            .Select-control { background-color: #111827 !important; border-color: #1e293b !important; }
+            .Select-menu-outer { background-color: #111827 !important; border-color: #1e293b !important; }
+            .Select-option { background-color: #111827 !important; color: #f1f5f9 !important; }
             .Select-option:hover { background-color: #1f2937 !important; }
-            .Select-value-label { color: #f9fafb !important; }
-            .Select-placeholder { color: #9ca3af !important; }
-            .Select-input input { color: #f9fafb !important; }
+            .Select-value-label { color: #f1f5f9 !important; }
+            .Select-placeholder { color: #94a3b8 !important; }
+            .Select-input input { color: #f1f5f9 !important; }
         </style>
     </head>
     <body class="bg-background text-foreground min-h-screen antialiased">
@@ -482,14 +504,14 @@ def create_feature_importance_chart():
     
     fig.update_layout(
         template='plotly_dark',
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(family='Inter', color='#9ca3af'),
-        xaxis=dict(title='Importance', gridcolor='rgba(30, 58, 95, 0.3)', tickformat='.0%'),
-        yaxis=dict(gridcolor='rgba(30, 58, 95, 0.3)'),
+        paper_bgcolor='rgba(17,24,39,0)',
+        plot_bgcolor='rgba(17,24,39,0)',
+        font=dict(family='Inter', color='#94a3b8'),
+        xaxis=dict(title='Importance', gridcolor='rgba(30, 41, 59, 0.8)', tickformat='.0%'),
+        yaxis=dict(gridcolor='rgba(30, 41, 59, 0.8)'),
         margin=dict(l=180, r=40, t=20, b=40),
         height=350,
-        hoverlabel=dict(bgcolor='#1f2937', font_size=12)
+        hoverlabel=dict(bgcolor='#1f2937', font_size=12, bordercolor='#1e293b')
     )
     return fig
 
@@ -517,14 +539,14 @@ def create_clv_distribution_chart():
     
     fig.update_layout(
         template='plotly_dark',
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(family='Inter', color='#9ca3af'),
-        xaxis=dict(title='Customer Lifetime Value ($)', gridcolor='rgba(30, 58, 95, 0.3)', tickformat='$,.0f'),
-        yaxis=dict(title='Nombre de clients', gridcolor='rgba(30, 58, 95, 0.3)'),
+        paper_bgcolor='rgba(17,24,39,0)',
+        plot_bgcolor='rgba(17,24,39,0)',
+        font=dict(family='Inter', color='#94a3b8'),
+        xaxis=dict(title='Customer Lifetime Value ($)', gridcolor='rgba(30, 41, 59, 0.8)', tickformat='$,.0f'),
+        yaxis=dict(title='Nombre de clients', gridcolor='rgba(30, 41, 59, 0.8)'),
         margin=dict(l=60, r=40, t=20, b=60),
         height=350,
-        hoverlabel=dict(bgcolor='#1f2937', font_size=12)
+        hoverlabel=dict(bgcolor='#1f2937', font_size=12, bordercolor='#1e293b')
     )
     return fig
 
@@ -568,15 +590,15 @@ def create_prediction_chart():
     
     fig.update_layout(
         template='plotly_dark',
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(family='Inter', color='#9ca3af'),
-        xaxis=dict(title='Index Client', gridcolor='rgba(30, 58, 95, 0.3)'),
-        yaxis=dict(title='CLV ($)', gridcolor='rgba(30, 58, 95, 0.3)', tickformat='$,.0f'),
+        paper_bgcolor='rgba(17,24,39,0)',
+        plot_bgcolor='rgba(17,24,39,0)',
+        font=dict(family='Inter', color='#94a3b8'),
+        xaxis=dict(title='Index Client', gridcolor='rgba(30, 41, 59, 0.8)'),
+        yaxis=dict(title='CLV ($)', gridcolor='rgba(30, 41, 59, 0.8)', tickformat='$,.0f'),
         margin=dict(l=80, r=40, t=20, b=60),
         height=350,
         legend=dict(orientation='h', yanchor='bottom', y=1.02),
-        hoverlabel=dict(bgcolor='#1f2937', font_size=12)
+        hoverlabel=dict(bgcolor='#1f2937', font_size=12, bordercolor='#1e293b')
     )
     return fig
 
@@ -630,15 +652,15 @@ def create_real_vs_predicted_scatter():
 
     fig.update_layout(
         template='plotly_dark',
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(family='Inter', color='#9ca3af'),
-        xaxis=dict(title='Valeur Réelle (CLV $)', gridcolor='rgba(30, 58, 95, 0.3)', tickformat='$,.0f'),
-        yaxis=dict(title='Valeur Prédite (CLV $)', gridcolor='rgba(30, 58, 95, 0.3)', tickformat='$,.0f'),
+        paper_bgcolor='rgba(17,24,39,0)',
+        plot_bgcolor='rgba(17,24,39,0)',
+        font=dict(family='Inter', color='#94a3b8'),
+        xaxis=dict(title='Valeur Réelle (CLV $)', gridcolor='rgba(30, 41, 59, 0.8)', tickformat='$,.0f'),
+        yaxis=dict(title='Valeur Prédite (CLV $)', gridcolor='rgba(30, 41, 59, 0.8)', tickformat='$,.0f'),
         margin=dict(l=70, r=30, t=20, b=60),
         height=350,
         legend=dict(orientation='h', yanchor='bottom', y=1.02),
-        hoverlabel=dict(bgcolor='#1f2937', font_size=12)
+        hoverlabel=dict(bgcolor='#1f2937', font_size=12, bordercolor='#1e293b')
     )
     return fig
 
@@ -691,11 +713,11 @@ def create_qq_plot():
 
     fig.update_layout(
         template='plotly_dark',
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(family='Inter', color='#9ca3af'),
-        xaxis=dict(title='Quantiles théoriques (Normal)', gridcolor='rgba(30, 58, 95, 0.3)'),
-        yaxis=dict(title='Quantiles observés (résidus)', gridcolor='rgba(30, 58, 95, 0.3)'),
+        paper_bgcolor='rgba(17,24,39,0)',
+        plot_bgcolor='rgba(17,24,39,0)',
+        font=dict(family='Inter', color='#94a3b8'),
+        xaxis=dict(title='Quantiles théoriques (Normal)', gridcolor='rgba(30, 41, 59, 0.8)'),
+        yaxis=dict(title='Quantiles observés (résidus)', gridcolor='rgba(30, 41, 59, 0.8)'),
         margin=dict(l=60, r=40, t=20, b=60),
         height=300,
         showlegend=True,
@@ -743,11 +765,11 @@ def create_residuals_chart():
 
     fig.update_layout(
         template='plotly_dark',
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(family='Inter', color='#9ca3af'),
-        xaxis=dict(title='Résidus (log-scale)', gridcolor='rgba(30, 58, 95, 0.3)'),
-        yaxis=dict(title='Fréquence', gridcolor='rgba(30, 58, 95, 0.3)'),
+        paper_bgcolor='rgba(17,24,39,0)',
+        plot_bgcolor='rgba(17,24,39,0)',
+        font=dict(family='Inter', color='#94a3b8'),
+        xaxis=dict(title='Résidus (log-scale)', gridcolor='rgba(30, 41, 59, 0.8)'),
+        yaxis=dict(title='Fréquence', gridcolor='rgba(30, 41, 59, 0.8)'),
         margin=dict(l=60, r=40, t=20, b=60),
         height=300,
         showlegend=True,
@@ -763,9 +785,9 @@ def create_residuals_chart():
 def create_sidebar():
     """Barre latérale de navigation"""
     nav_items = [
-        {"label": "Portfolio Insights", "icon": "fa-solid fa-chart-pie", "href": "/"},
-        {"label": "Smart Simulator", "icon": "fa-solid fa-bullseye", "href": "/simulator"},
-        {"label": "Scientific Audit", "icon": "fa-solid fa-flask", "href": "/audit"},
+        {"label": "Portfolio Insights", "icon": "fa-solid fa-table-columns", "href": "/", "description": "Vue d'ensemble du portefeuille"},
+        {"label": "Smart Simulator", "icon": "fa-solid fa-calculator", "href": "/simulator", "description": "Prédiction CLV & Risque"},
+        {"label": "Audit Scientifique", "icon": "fa-solid fa-shield-halved", "href": "/audit", "description": "Validation statistique"},
     ]
     
     mode_class = "bg-success/20 text-success" if MODEL_LOADED else "bg-warning/20 text-warning"
@@ -775,38 +797,48 @@ def create_sidebar():
     return html.Div(
         className="fixed left-0 top-0 h-full w-64 bg-card border-r border-border flex flex-col z-50",
         children=[
-            # Logo
             html.Div(
-                className="p-6 border-b border-border",
+                className="h-20 flex items-center gap-3 px-4 border-b border-border",
                 children=[
                     html.Div(
-                        className="flex items-center gap-3",
+                        className="flex flex-col leading-none",
+                        style={"fontFamily": "'Montserrat', sans-serif"},
                         children=[
                             html.Div(
-                                className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-info flex items-center justify-center glow-primary",
+                                className="flex items-baseline",
                                 children=[
-                                    html.I(className="fa-solid fa-chart-line text-white text-lg")
+                                    html.Span("Customer", className="text-2xl font-black tracking-tight text-foreground"),
+                                    html.Span("Path", className="text-2xl font-black tracking-tight bg-gradient-to-r from-primary to-emerald-400 bg-clip-text", style={"WebkitBackgroundClip": "text", "WebkitTextFillColor": "transparent"})
                                 ]
                             ),
-                            html.Div([
-                                html.Div("CLV Predictor", className="font-bold text-foreground"),
-                                html.Div("Random Forest", className="text-xs text-muted-foreground")
-                            ])
+                            html.Div(
+                                className="flex items-center gap-1.5 mt-1",
+                                children=[
+                                    html.Div(className="h-0.5 w-8 bg-gradient-to-r from-primary to-emerald-400 rounded-full"),
+                                    html.Span("Prédiction CLV", className="text-[9px] uppercase tracking-[0.25em] text-muted-foreground/50 font-semibold")
+                                ]
+                            )
                         ]
                     )
                 ]
             ),
             
-            # Navigation
+            # Navigation avec descriptions
             html.Nav(
-                className="flex-1 p-4 space-y-2",
+                className="flex-1 p-3 space-y-1",
                 children=[
                     dcc.Link(
-                        className="flex items-center gap-3 px-4 py-3 rounded-lg text-muted-foreground hover:bg-card-hover hover:text-foreground transition-all duration-200",
+                        className="flex items-center gap-3 px-3 py-3 rounded-lg text-muted-foreground hover:bg-card-hover hover:text-foreground transition-all duration-200",
                         href=item["href"],
                         children=[
-                            html.I(className=f"{item['icon']} text-lg w-5"),
-                            html.Span(item["label"], className="font-medium")
+                            html.I(className=f"{item['icon']} h-5 w-5 flex-shrink-0"),
+                            html.Div(
+                                className="flex-1 min-w-0",
+                                children=[
+                                    html.P(item["label"], className="text-sm font-medium truncate"),
+                                    html.P(item["description"], className="text-[10px] text-muted-foreground/50 truncate")
+                                ]
+                            )
                         ]
                     ) for item in nav_items
                 ]
@@ -964,19 +996,19 @@ def create_risk_management_gauge(prediction, lower, upper, confidence=95):
         risk_level = "low"
         risk_text = "Faible"
         risk_color = "success"
-        gauge_color = "#10b981"  # Emerald
-        zone_color = "rgba(16, 185, 129, 0.3)"
+        gauge_color = "#22c55e"  # Green-500
+        zone_color = "rgba(34, 197, 94, 0.3)"
     elif risk_ratio < 0.7:
         risk_level = "medium"
         risk_text = "Modéré"
         risk_color = "warning"
-        gauge_color = "#f59e0b"  # Amber
+        gauge_color = "#f59e0b"  # Amber-500
         zone_color = "rgba(245, 158, 11, 0.3)"
     else:
         risk_level = "high"
         risk_text = "Élevé"
         risk_color = "danger"
-        gauge_color = "#ef4444"  # Red
+        gauge_color = "#ef4444"  # Red-500
         zone_color = "rgba(239, 68, 68, 0.3)"
     
     color_classes = {
@@ -1000,13 +1032,13 @@ def create_risk_management_gauge(prediction, lower, upper, confidence=95):
         value=prediction,
         number={
             'prefix': "$",
-            'font': {'size': 48, 'color': '#ffffff', 'family': 'Inter'},
+            'font': {'size': 48, 'color': '#f1f5f9', 'family': 'Inter'},
             'valueformat': ",.0f"
         },
         delta={
             'reference': (lower + upper) / 2,
             'relative': False,
-            'increasing': {'color': '#10b981'},
+            'increasing': {'color': '#22c55e'},
             'decreasing': {'color': '#ef4444'},
             'font': {'size': 16}
         },
@@ -1014,24 +1046,24 @@ def create_risk_management_gauge(prediction, lower, upper, confidence=95):
             'axis': {
                 'range': [gauge_min, gauge_max],
                 'tickwidth': 2,
-                'tickcolor': "#6b7280",
+                'tickcolor': "#475569",
                 'tickformat': "$,.0f",
-                'tickfont': {'color': '#9ca3af', 'size': 11, 'family': 'Inter'}
+                'tickfont': {'color': '#94a3b8', 'size': 11, 'family': 'Inter'}
             },
             'bar': {'color': gauge_color, 'thickness': 0.3},
-            'bgcolor': "rgba(30, 41, 59, 0.5)",
+            'bgcolor': "rgba(30, 41, 59, 0.8)",
             'borderwidth': 2,
-            'bordercolor': "rgba(107, 114, 128, 0.3)",
+            'bordercolor': "rgba(51, 65, 85, 0.8)",
             'steps': [
                 # Zone avant l'intervalle de confiance (gris)
-                {'range': [gauge_min, lower], 'color': 'rgba(107, 114, 128, 0.2)'},
+                {'range': [gauge_min, lower], 'color': 'rgba(51, 65, 85, 0.4)'},
                 # Zone de confiance Bootstrap (colorée)
                 {'range': [lower, upper], 'color': zone_color},
                 # Zone après l'intervalle de confiance (gris)
-                {'range': [upper, gauge_max], 'color': 'rgba(107, 114, 128, 0.2)'}
+                {'range': [upper, gauge_max], 'color': 'rgba(51, 65, 85, 0.4)'}
             ],
             'threshold': {
-                'line': {'color': '#ffffff', 'width': 4},
+                'line': {'color': '#f1f5f9', 'width': 4},
                 'thickness': 0.8,
                 'value': prediction
             }
@@ -1052,7 +1084,7 @@ def create_risk_management_gauge(prediction, lower, upper, confidence=95):
         x=0.88, y=0.25,
         text=f"<b>Borne Sup.</b><br>${upper:,.0f}",
         showarrow=False,
-        font=dict(size=12, color='#10b981', family='Inter'),
+        font=dict(size=12, color='#22c55e', family='Inter'),
         align='center'
     )
     
@@ -1061,14 +1093,14 @@ def create_risk_management_gauge(prediction, lower, upper, confidence=95):
         x=0.5, y=-0.05,
         text=f"Zone de Confiance Bootstrap {confidence}%",
         showarrow=False,
-        font=dict(size=11, color='#60a5fa', family='Inter'),
+        font=dict(size=11, color='#06b6d4', family='Inter'),
         align='center'
     )
     
     fig.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(family='Inter', color='#9ca3af'),
+        paper_bgcolor='rgba(17,24,39,0)',
+        plot_bgcolor='rgba(17,24,39,0)',
+        font=dict(family='Inter', color='#94a3b8'),
         margin=dict(l=30, r=30, t=50, b=30),
         height=280
     )
@@ -1195,7 +1227,7 @@ def create_uncertainty_gauge(value, label="Incertitude"):
                 ]
             ),
             html.Div(
-                className="w-full bg-gray-800 rounded-full h-3 overflow-hidden mb-3",
+                className="w-full bg-slate-700 rounded-full h-3 overflow-hidden mb-3",
                 children=[
                     html.Div(
                         className=f"{color} h-full rounded-full transition-all duration-500",
@@ -1268,7 +1300,6 @@ def create_portfolio_page():
     return html.Div(
         className="space-y-8",
         children=[
-            # Header - React style with icon and colored text
             html.Div(
                 className="mb-8 space-y-2",
                 children=[
@@ -1276,22 +1307,23 @@ def create_portfolio_page():
                         className="flex items-center gap-3",
                         children=[
                             html.Div(
-                                className="p-2 rounded-lg bg-gradient-to-br from-primary to-info",
+                                className="p-2 rounded-lg bg-gradient-to-br from-primary to-emerald-400",
                                 children=[
-                                    html.I(className="fa-solid fa-chart-pie text-white text-lg")
+                                    html.I(className="fa-solid fa-layer-group text-white text-lg")
                                 ]
                             ),
                             html.H1(
                                 children=[
                                     "Portfolio ",
-                                    html.Span("Insights", className="text-primary")
+                                    html.Span("Insights", className="bg-gradient-to-r from-primary to-emerald-400 bg-clip-text", style={"WebkitBackgroundClip": "text", "WebkitTextFillColor": "transparent"})
                                 ],
-                                className="text-3xl font-bold text-foreground"
+                                className="text-2xl font-black tracking-tight text-foreground",
+                                style={"fontFamily": "'Montserrat', sans-serif"}
                             )
                         ]
                     ),
                     html.P("Vue d'ensemble des métriques CLV et performance du modèle Random Forest", 
-                           className="text-muted-foreground")
+                           className="text-muted-foreground text-sm")
                 ]
             ),
             
@@ -1449,7 +1481,6 @@ def create_simulator_page():
     return html.Div(
         className="space-y-8",
         children=[
-            # Header - React style with icon and colored text
             html.Div(
                 className="mb-8 space-y-2",
                 children=[
@@ -1457,22 +1488,23 @@ def create_simulator_page():
                         className="flex items-center gap-3",
                         children=[
                             html.Div(
-                                className="p-2 rounded-lg bg-gradient-to-br from-warning to-orange-400",
+                                className="p-2 rounded-lg bg-gradient-to-br from-warning to-amber-400",
                                 children=[
-                                    html.I(className="fa-solid fa-bullseye text-white text-lg")
+                                    html.I(className="fa-solid fa-wand-magic-sparkles text-white text-lg")
                                 ]
                             ),
                             html.H1(
                                 children=[
                                     "Smart ",
-                                    html.Span("Simulator", className="text-warning")
+                                    html.Span("Simulator", className="bg-gradient-to-r from-warning to-amber-400 bg-clip-text", style={"WebkitBackgroundClip": "text", "WebkitTextFillColor": "transparent"})
                                 ],
-                                className="text-3xl font-bold text-foreground"
+                                className="text-2xl font-black tracking-tight text-foreground",
+                                style={"fontFamily": "'Montserrat', sans-serif"}
                             )
                         ]
                     ),
                     html.P("Prédiction CLV personnalisée avec intervalle de confiance Bootstrap 95%", 
-                           className="text-muted-foreground")
+                           className="text-muted-foreground text-sm")
                 ]
             ),
             
@@ -1703,20 +1735,21 @@ def create_audit_page():
                             html.Div(
                                 className="p-2 rounded-lg bg-gradient-to-br from-info to-cyan-400",
                                 children=[
-                                    html.I(className="fa-solid fa-shield-halved text-white text-lg")
+                                    html.I(className="fa-solid fa-microscope text-white text-lg")
                                 ]
                             ),
                             html.H1(
                                 children=[
                                     "Audit ",
-                                    html.Span("Scientifique", className="text-info")
+                                    html.Span("Scientifique", className="bg-gradient-to-r from-info to-cyan-400 bg-clip-text", style={"WebkitBackgroundClip": "text", "WebkitTextFillColor": "transparent"})
                                 ],
-                                className="text-3xl font-bold text-foreground"
+                                className="text-2xl font-black tracking-tight text-foreground",
+                                style={"fontFamily": "'Montserrat', sans-serif"}
                             )
                         ]
                     ),
                     html.P("Validation statistique du modèle et certification de fiabilité", 
-                           className="text-muted-foreground")
+                           className="text-muted-foreground text-sm")
                 ]
             ),
             
@@ -1850,7 +1883,6 @@ def create_audit_page():
                             ),
                         ]
                     ),
-
 
                     html.Div(
                         className=(
