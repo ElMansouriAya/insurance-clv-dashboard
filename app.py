@@ -1465,7 +1465,7 @@ def create_portfolio_page():
                                 className="bg-background rounded-lg p-4 text-center",
                                 children=[
                                     html.Span("Largeur IC", className="text-xs text-muted-foreground block mb-1"),
-                                    html.Span(f"${PORTFOLIO_STATS['mean_interval_width']:,}", className="font-mono font-bold text-secondary")
+                                    html.Span(f"${PORTFOLIO_STATS['mean_interval_width']:,.0f}", className="font-mono font-bold text-secondary")
                                 ]
                             ),
                         ]
